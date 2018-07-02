@@ -28,6 +28,9 @@ import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.BoundStatement;
+import com.datastax.driver.core.policies.DCAwareRoundRobinPolicy;
+import com.datastax.driver.core.policies.LoadBalancingPolicy;
+import com.datastax.driver.core.policies.RoundRobinPolicy;
 import com.datastax.driver.core.querybuilder.Insert;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
 import com.datastax.driver.core.querybuilder.Select;
@@ -113,7 +116,12 @@ public class CassandraCQLClient extends DB {
 
   public static final String TRACING_PROPERTY = "cassandra.tracing";
   public static final String TRACING_PROPERTY_DEFAULT = "false";
-  
+
+  public static final String LOAD_BALANCER_PROPERTY = "cassandra.loadbalancer";
+  public static final String LOAD_BALANCER_RR = "RoundRobinPolicy";
+  public static final String LOAD_BALANCER_DCAWARE = "DCAwareRoundRobinPolicy";
+  public static final String LOCAL_DC_PROPERTY = "cassandra.DC";
+
   /**
    * Count the number of times initialized to teardown on the last
    * {@link #cleanup()}.
@@ -171,12 +179,26 @@ public class CassandraCQLClient extends DB {
             getProperties().getProperty(WRITE_CONSISTENCY_LEVEL_PROPERTY,
                 WRITE_CONSISTENCY_LEVEL_PROPERTY_DEFAULT));
 
+        String loadBalancer = getProperties().getProperty(LOAD_BALANCER_PROPERTY);
+
+        LoadBalancingPolicy lb = DCAwareRoundRobinPolicy.builder().build();
+        if(loadBalancer != null){
+          if(loadBalancer.equals(LOAD_BALANCER_RR)){
+            lb = new RoundRobinPolicy();
+          }else if (loadBalancer.equals(LOAD_BALANCER_DCAWARE)){
+            String localDC = getProperties().getProperty(LOCAL_DC_PROPERTY);
+            if(localDC != null){
+              lb = DCAwareRoundRobinPolicy.builder().withLocalDc(localDC).build();
+            }
+          }
+        }
+
         if ((username != null) && !username.isEmpty()) {
           cluster = Cluster.builder().withCredentials(username, password)
-              .withPort(Integer.valueOf(port)).addContactPoints(hosts).build();
+              .withPort(Integer.valueOf(port)).addContactPoints(hosts).withLoadBalancingPolicy(lb).build();
         } else {
           cluster = Cluster.builder().withPort(Integer.valueOf(port))
-              .addContactPoints(hosts).build();
+              .addContactPoints(hosts).withLoadBalancingPolicy(lb).build();
         }
 
         String maxConnections = getProperties().getProperty(
